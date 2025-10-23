@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sound Chart — Fast Tap (Responsive)</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* Scales nicely from phones → tablets → desktop */
+    --tile-h: clamp(48px, 9.5vh, 72px);
+    --tile-minw: clamp(84px, 28vw, 160px);
+    --gap: 10px; --radius: 14px;
+    --bg1:#fff8d6; --bg2:#e6f7ff; --ink:#10243e; --muted:#64748b;
+    --panel-w: min(1200px, 100%);
+  }
+
+  html,body{height:100%;margin:0;background:linear-gradient(135deg,var(--bg1),var(--bg2));color:var(--ink);font-family:"Lexend",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  body{overflow:auto}
+
+  /* Page shell — fluid, no fixed canvas, scrolls on mobile */
+  #page{
+    max-width: var(--panel-w);
+    margin: 0 auto;
+    min-height: 100dvh; /* account for mobile UI */
+    display:flex;flex-direction:column;gap:10px;
+    padding: 10px;
+  }
+
+  header{position:sticky;top:0;background:linear-gradient(135deg,#fff, #fff8);backdrop-filter: blur(6px);
+    display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:16px;border:2px solid #0f172a20;z-index:3}
+  h1{margin:0;font-size:clamp(18px,4.6vw,24px)}
+  .controls{display:flex;align-items:center;gap:8px}
+  .btn{appearance:none;border:0;background:#2563eb;color:#fff;font-weight:700;border-radius:12px;padding:10px 14px;font-size:clamp(14px,3.6vw,16px);cursor:pointer;box-shadow:0 2px 0 rgba(0,0,0,.2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn:active{transform:none}
+
+  .sub{font-size:clamp(10px,3.2vw,12px);color:var(--muted)}
+
+  /* Responsive grid for panels (left→right, wraps) */
+  .wrap{display:grid;gap:12px;align-items:start}
+  /* Desktop: 3 columns of panels; tablet: 2; phone: 1 */
+  @media (min-width: 1024px){ .wrap{ grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 640px) and (max-width: 1023.98px){ .wrap{ grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 639.98px){ .wrap{ grid-template-columns: 1fr; } }
+
+  .panel{--gc:#60a5fa;border-radius:16px;overflow:hidden;background:#fff;
+    border:2px solid color-mix(in oklab,var(--gc) 65%, #000 15%);
+    display:flex;flex-direction:column;min-width:0}
+  .panel h2{margin:0;padding:8px 12px;font-size:clamp(13px,3.6vw,15px);color:#0f172a;
+    background:linear-gradient(90deg, color-mix(in oklab,var(--gc) 28%, #fff 72%), #ffffff);
+    border-bottom:2px solid color-mix(in oklab,var(--gc) 55%, #000 10%)}
+  .sticker{font-size:16px;margin-right:6px}
+
+  /* Tiles auto-fill across each panel */
+  .grid{display:grid;gap:8px;padding:10px;grid-template-columns:repeat(auto-fill,minmax(var(--tile-minw),1fr))}
+  .tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:var(--tile-h);border-radius:var(--radius);cursor:pointer;user-select:none;
+    border:2px solid color-mix(in oklab,var(--gc) 65%, #000 15%);background:#fff;
+    transition:transform .06s,box-shadow .16s,background .16s;box-shadow:none;touch-action:manipulation}
+  .tile:where(:hover){background:#fffdf2}
+  .tile:active{transform:none}
+  .tile.playing{background:#f0f9ff}
+  .big{font-size:clamp(17px,4.8vw,22px);font-weight:700;line-height:1}
+  .small{font-size:clamp(10px,3.2vw,12px);color:#ef4444;margin-top:1px}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(59,130,246,.35)}100%{box-shadow:0 0 0 8px rgba(59,130,246,0)}}
+  .tile.playing::after{content:"";position:absolute;inset:-3px;border-radius:16px;border:2px solid transparent;animation:pulse .55s ease-out 1}
+
+  footer{display:flex;gap:8px;align-items:center;justify-content:center;font-size:14px;opacity:.85;padding:12px 8px}
+
+  /* Tiny stacked credits, bottom-right on wide screens; inline on small screens */
+  .credit{font-size:10px;line-height:1.2;color:var(--muted);opacity:.85;text-align:right;max-width:min(48ch, 100%);margin-left:auto}
+  .credit a{color:inherit;text-decoration:underline}
+
+  /* Print */
+  @page{size:A4 landscape;margin:8mm}
+  @media print{
+    html,body{overflow:visible;background:#fff}
+    header,.sub,footer{display:none}
+    #page{max-width:none;padding:0}
+  }
+
+  /* Simple full-screen Magnify overlay for mobile (no popups) */
+  dialog#magnify{border:0;border-radius:20px;max-width: min(920px, 96vw);width: 96vw; padding: 0;}
+  .mag-shell{display:flex;flex-direction:column;gap:12px;padding:16px}
+  .mag-group{font-size:clamp(18px,5vw,22px);font-weight:700;color:#0f172a;opacity:.9}
+  .mag-bigbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;height:min(46vh,420px);
+    border:6px solid #2563eb;border-radius:20px;background:#fff;cursor:pointer;box-shadow:0 12px 24px rgba(0,0,0,.12)}
+  .mag-label{font-size:clamp(64px,16vw,112px);font-weight:800;line-height:1}
+  .mag-ex{font-size:clamp(18px,4.6vw,22px);color:#ef4444;margin-top:6px}
+  .mag-row{display:flex;gap:10px;justify-content:center}
+</style>
+</head>
+<body>
+  <div id="page" aria-label="phonogram sound chart (fast)">
+    <header>
+      <div>
+        <h1>🎵 Tap a Box to Hear the Sound!</h1>
+        <div class="sub">Files: <code>audio/c_*.mp3</code> & <code>audio/v_*.mp3</code> • Missing files use speech</div>
+      </div>
+      <div class="controls"><button id="magnifyBtn" class="btn" disabled>Magnify</button></div>
+    </header>
+
+    <div class="wrap" id="wrap"></div>
+
+    <div class="credit" role="contentinfo" aria-label="credits">
+      <div>© 2025 Lim Kim Sze
+        <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC-ND 4.0</a>
+      </div>
+      <div>Audio © <span id="yearAudio"></span> sithu, lookang, eve, huaylee —
+        <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC-SA 4.0</a>.
+        Compiled with <a href="https://www.um.es/fem/EjsWiki/Main/WebEJS" target="_blank" rel="noopener noreferrer">WebEJS</a>.
+      </div>
+      <div>Audio © Ministry of Education (Singapore), used with permission.</div>
+    </div>
+
+    <footer>Have fun learning!</footer>
+  </div>
+
+  <!-- Magnify Overlay (mobile-friendly) -->
+  <dialog id="magnify">
+    <div class="mag-shell">
+      <div id="magGroup" class="mag-group"></div>
+      <button id="magPlay" class="mag-bigbtn" aria-label="Play sound">
+        <div id="magLabel" class="mag-label"></div>
+        <div id="magEx" class="mag-ex"></div>
+      </button>
+      <div class="mag-row">
+        <button id="magBack" class="btn">Back/Play</button>
+        <button id="magHome" class="btn">Close</button>
+        <button id="magNext" class="btn">Next/Play</button>
+      </div>
+    </div>
+  </dialog>
+
+<script>
+/* Colors per group */
+const COLORS={consVoiced:'#60a5fa',consUnvoiced:'#3b82f6',teams:'#22c55e',
+  short:'#f59e0b',longA:'#fb923c',longE:'#a78bfa',longI:'#f43f5e',longO:'#14b8a6',longU:'#eab308',
+  vteams:'#f97316',r:'#06b6d4',suf:'#34d399',pre:'#84cc16'};
+
+/* Stickers per group */
+const STICKERS={
+  'Voiced Consonants':'🗣️','Unvoiced Consonants':'🤫','Consonant Exception':'❗','Consonant Blends':'🔗',
+  'Consonant Digraphs':'🔗','Trigraphs':'🧩','Consonant -le Syllables':'🍎','Short Vowels':'⚡','Schwa':'🌀',
+  'Vowel and Vowel Teams':'🅰️','Long E /ē/':'🅴','Long I /ī/':'🅸','Long O /ō/':'🅾️','Long U /ū/':'🆄',
+  'Vowel Teams':'👯','Diphthongs':'🌊','R-controlled Vowels':'🧭','Morphemes — Prefixes':'🔰','Morphemes — Suffixes':'🔚'
+};
+
+/* Data — ids map to audio/<id>.mp3  */
+const DATA=[
+  {title:"Voiced Consonants",color:COLORS.consVoiced,items:[
+    {id:"c_b",label:"b",example:"bin"},{id:"c_d",label:"d",example:"dot"},
+    {id:"c_g",label:"hard g",example:"goat"},{id:"c_j",label:"soft g",example:"gem"},
+    {id:"c_j",label:"j",example:"jump"},{id:"c_l",label:"l",example:"log"},
+    {id:"c_m",label:"m",example:"mat"},{id:"c_n",label:"n",example:"net"},
+    {id:"c_r",label:"r",example:"rat"},{id:"c_v",label:"v",example:"van"},
+    {id:"c_w",label:"w",example:"wet"},{id:"c_y",label:"y",example:"yes"},
+    {id:"c_z",label:"z",example:"zip"}
+  ]},
+  {title:"Unvoiced Consonants",color:COLORS.consUnvoiced,items:[
+    {id:"c_f",label:"f",example:"fun"},{id:"c_k",label:"k",example:"king"},
+    {id:"c_k",label:"hard c",example:"cat"},{id:"c_s",label:"soft c",example:"city"},
+    {id:"c_s",label:"s",example:"sun"},{id:"c_h",label:"h",example:"hen"},
+    {id:"c_p",label:"p",example:"pet"},{id:"c_t",label:"t",example:"top"}
+  ]},
+  {title:"Consonant Exception",color:COLORS.consUnvoiced,items:[
+    {id:"c_qu",label:"qu",example:"queen"},{id:"c_x",label:"x",example:"fix"}
+  ]},
+  {title:"Consonant Blends",color:COLORS.consUnvoiced,items:[
+    {id:"nk",label:"nk",example:"bank"}
+  ]},
+  {title:"Consonant Digraphs",color:COLORS.teams,items:[
+    {id:"c_ff",label:"ff",example:"puff"},{id:"c_ll",label:"ll",example:"fill"},
+    {id:"c_ss",label:"ss",example:"hiss"},{id:"c_zz",label:"zz",example:"buzz"},
+    {id:"c_ch",label:"ch",example:"chin"},{id:"c_sh",label:"sh",example:"ship"},
+    {id:"th",label:"th (voiced)",example:"this"},{id:"th-vless",label:"th (unvoiced)",example:"thing"},
+    {id:"c_k",label:"ck",example:"back"},{id:"c_n",label:"kn",example:"know"},
+    {id:"c_ng",label:"ng",example:"ring"}
+  ]},
+  {title:"Trigraphs",color:COLORS.teams,items:[
+    {id:"c_tch",label:"tch",example:"match"},
+    {id:"c_dge",label:"dge",example:"judge"}
+  ]},
+  {title:"Consonant -le Syllables",color:COLORS.teams,items:[
+    {id:"-ble",label:"ble",example:"marble"},
+    {id:"-dle",label:"dle",example:"candle"},
+    {id:"-ple",label:"ple",example:"apple"},
+    {id:"-tle",label:"tle",example:"bottle"},
+    {id:"-gle",label:"gle",example:"wiggle"}
+  ]},
+  {title:"Short Vowels",color:COLORS.short,items:[
+    {id:"shorta",label:"a",example:"cat"},{id:"shorte",label:"e",example:"get"},
+    {id:"shorti",label:"i",example:"ship"},{id:"shorto",label:"o",example:"hot"},
+    {id:"shortu",label:"u",example:"up"},{id:"shorte",label:"ea",example:"bread"}
+  ]},
+  {title:"Schwa",color:COLORS.short,items:[
+    {id:"schwa",label:"a",example:"about"},{id:"schwa",label:"e",example:"open"},
+    {id:"schwa",label:"i",example:"family"},{id:"schwa",label:"o",example:"lemon"},
+    {id:"schwa",label:"u",example:"succeed"}
+  ]},
+
+  // --- Long A /ā/
+  { title:"Vowel and Vowel Teams", color:COLORS.longA, items:[
+    {id:"v_ai", label:"a",   example:"able"},
+    {id:"v_ai", label:"a-e", example:"save"},
+    {id:"v_ai", label:"ai",  example:"rain"},
+    {id:"v_ai", label:"ay",  example:"day"},
+    {id:"v_ai", label:"ey",  example:"grey"},
+    {id:"v_ai", label:"ei",  example:"vein"}
+  ]},
+
+  // --- Long E /ē/
+  { title:"Long E /ē/", color:COLORS.longE, items:[
+    {id:"v_ee", label:"e",   example:"evil"},
+    {id:"v_ee", label:"e-e", example:"these"},
+    {id:"v_ee", label:"y",   example:"happy"},
+    {id:"v_ee", label:"ea",  example:"bead"},
+    {id:"v_ee", label:"ee",  example:"greet"},
+    {id:"v_ee", label:"ey",  example:"key"},
+    {id:"v_ee", label:"ei",  example:"ceiling"},
+    {id:"v_ee", label:"ie",  example:"piece"}
+  ]},
+
+  // --- Long I /ī/
+  { title:"Long I /ī/", color:COLORS.longI, items:[
+    {id:"v_i-e", label:"i",   example:"final"},
+    {id:"v_i-e", label:"i-e", example:"life"},
+    {id:"v_i-e", label:"y",   example:"fly"},
+    {id:"v_i-e", label:"igh", example:"high"},
+    {id:"v_i-e", label:"ie",  example:"pie"}
+  ]},
+
+  // --- Long O /ō/
+  { title:"Long O /ō/", color:COLORS.longO, items:[
+    {id:"v_o-e", label:"o",   example:"holy"},
+    {id:"v_o-e", label:"o-e", example:"hope"},
+    {id:"v_o-e", label:"ow",  example:"slow"},
+    {id:"v_o-e", label:"oa",  example:"boat"}
+  ]},
+
+  // --- Long U /ū/
+  { title:"Long U /ū/", color:COLORS.longU, items:[
+    {id:"v_u-e", label:"u",   example:"duty"},
+    {id:"v_u-e", label:"u-e", example:"tube"},
+    {id:"v_u-e", label:"ue",  example:"argue"},
+    {id:"v_u-e", label:"ew",  example:"chew"}
+  ]},
+
+  {title:"Vowel Teams",color:COLORS.vteams,items:[
+    {id:"longoo",label:"long oo",example:"school"},
+    {id:"longoo", label:"ue",  example:"glue"},
+    {id:"longoo", label:"ew",  example:"blew"},
+    {id:"longoo", label:"ui",  example:"fruit"},
+    {id:"shortoo",label:"short oo",example:"book"},
+    {id:"v_aw",label:"aw",example:"paw"}
+  ]},
+  {title:"Diphthongs",color:COLORS.vteams,items:[
+    {id:"v_ou",label:"ow",example:"cow"},{id:"v_ou",label:"ou",example:"out"},
+    {id:"v_oi",label:"oi",example:"oil"},{id:"v_oy",label:"oy",example:"boy"}
+  ]},
+  {title:"R-controlled Vowels",color:COLORS.r,items:[
+    {id:"v_er",label:"er",example:"herd"},{id:"v_ir",label:"ir",example:"bird"},
+    {id:"v_ur",label:"ur",example:"fur"},{id:"v_or",label:"or",example:"fork"},
+    {id:"v_ar",label:"ar",example:"car"}
+  ]},
+  {title:"Morphemes — Prefixes",color:COLORS.pre,items:[
+    {id:"in-",label:"in-",example:"incomplete"},{id:"dis-",label:"dis-",example:"dislike"},
+    {id:"pre-",label:"pre-",example:"preview"},{id:"re-",label:"re-",example:"redo"},
+    {id:"un-",label:"un-",example:"unscrew"},{id:"mis-",label:"mis-",example:"misuse"},
+    {id:"under-",label:"under-",example:"underline"},{id:"over-",label:"over-",example:"overnight"},
+    {id:"non-",label:"non-",example:"non-stop"},{id:"mid-",label:"mid-",example:"midway"}
+  ]},
+  {title:"Morphemes — Suffixes",color:COLORS.suf,items:[
+    {id:"c_s",label:"-s",example:"books,friends"},{id:"es",label:"-es",example:"matches"},
+    {id:"edts",label:"-ed",example:"visited, crawled, reached"},{id:"er",label:"-er",example:"bigger"},
+    {id:"est",label:"-est",example:"longest"},{id:"ful",label:"-ful",example:"stressful"},
+    {id:"ous",label:"-ous",example:"nervous"},{id:"ly",label:"-ly",example:"quickly"},
+    {id:"-sion",label:"-sion",example:"impression"},{id:"tion",label:"-tion",example:"condition"},
+    {id:"able",label:"-able",example:"adaptable"},{id:"ment",label:"-ment",example:"movement"},
+    {id:"ness",label:"-ness",example:"illness"},{id:"ing",label:"-ing",example:"singing"},{id:"less",label:"-less",example:"restless"},{id:"delicious",label:"-cious",example:"gracious"}
+  ]}
+];
+
+/* Collect every id for optional preloading */
+const AUDIO_IDS = DATA.flatMap(sec => sec.items.map(it => it.id));
+
+/* -------- FAST audio engine (Web Audio with <audio> fallback) -------- */
+class AudioEngine{
+  constructor(){ this.ctx=null; this.buffers=new Map(); this.html=new Map(); this.prefetched=false; }
+  async unlock(){
+    if(this.ctx) { if(this.ctx.state==='suspended') await this.ctx.resume(); return; }
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){ this.ctx=new AC(); }
+  }
+  async loadBuffer(id){
+    if(this.buffers.has(id)) return this.buffers.get(id);
+    if(!this.ctx) throw new Error('noctx');
+    const url=`audio/${id}.mp3`;
+    const res=await fetch(url); if(!res.ok) throw new Error('fetch');
+    const arr=await res.arrayBuffer();
+    const buf=await this.ctx.decodeAudioData(arr);
+    this.buffers.set(id,buf);
+    return buf;
+  }
+  async play(id,onended){
+    // Returns true if audio started, false if we should fall back to speech
+    try{
+      await this.unlock();
+      if(this.ctx){
+        try{
+          const buf=await this.loadBuffer(id);
+          const src=this.ctx.createBufferSource();
+          src.buffer=buf;
+          const gain=this.ctx.createGain(); gain.gain.value=1.0;
+          src.connect(gain).connect(this.ctx.destination);
+          if(onended) src.onended=onended;
+          src.start(0);
+          if(!this.prefetched){ this.prefetched=true; this.preloadAll(); }
+          return true;
+        }catch(e){ /* fall through to HTMLAudio */ }
+      }
+    }catch(e){ /* ignore */ }
+    try{
+      let a=this.html.get(id);
+      if(!a){
+        a=new Audio(`audio/${id}.mp3`);
+        a.preload='auto'; a.playsInline=true; // important for iOS
+        this.html.set(id,a);
+      }
+      if(onended){ a.onended=onended; } else { a.onended=null; }
+      const ok = await a.play().then(()=>true).catch(()=>false);
+      return ok;
+    }catch(e){
+      return false;
+    }
+  }
+  preloadAll(concurrency=4){
+    if(!this.ctx) return;
+    const ids=AUDIO_IDS.slice(); let i=0;
+    const run=async()=>{
+      while(i<ids.length){
+        const id=ids[i++]; if(this.buffers.has(id)) continue;
+        try{ await this.loadBuffer(id); }catch(e){/* ignore missing */ }
+      }
+    };
+    for(let k=0;k<concurrency;k++) run();
+  }
+}
+const engine=new AudioEngine();
+
+/* -------- selection & magnify state -------- */
+let TILES=[]; let LAST_INDEX=-1; const magnifyBtn = document.getElementById('magnifyBtn');
+
+/* -------- render UI -------- */
+const wrap=document.getElementById('wrap');
+for(const section of DATA){
+  const p=document.createElement('section');
+  p.className='panel'; p.style.setProperty('--gc',section.color||'#60a5fa');
+  p.innerHTML=`<h2><span class="sticker">${STICKERS[section.title]||'⭐'}</span>${section.title}</h2>`;
+  const g=document.createElement('div'); g.className='grid';
+  for(const it of section.items){
+    const b=document.createElement('button');
+    b.className='tile';
+    b.dataset.id=it.id;
+    b.dataset.say=it.say||it.example||it.label;
+    /* group + emoji for Magnify header */
+    b.dataset.group = section.title;
+    b.dataset.emoji = STICKERS[section.title] || '⭐';
+
+    b.setAttribute('aria-label',`${it.label}, ${it.example||'sound'}`);
+    b.innerHTML=`<div class="big">${it.label}</div><div class="small">${it.example||""}</div>`;
+    b.addEventListener('pointerdown',()=>playTile(b), {passive:true});
+    g.appendChild(b);
+  }
+  p.appendChild(g); wrap.appendChild(p);
+}
+
+/* Play helper */
+function playTile(btn){
+  if(!TILES.length){ TILES = Array.from(document.querySelectorAll('.tile')); }
+  LAST_INDEX = TILES.indexOf(btn);
+  if(magnifyBtn) magnifyBtn.disabled = (LAST_INDEX < 0);
+
+  const id=btn.dataset.id;
+  btn.classList.add('playing'); stopOthers(btn);
+  engine.play(id, ()=>btn.classList.remove('playing'))
+    .then(ok => { if(!ok) speak(btn.dataset.say||btn.textContent.trim()); })
+    .catch(()=>speak(btn.dataset.say||btn.textContent.trim()));
+  setTimeout(()=>btn.classList.remove('playing'), 900);
+}
+function stopOthers(except){
+  document.querySelectorAll('.tile.playing').forEach(t=>{ if(t!==except) t.classList.remove('playing'); });
+}
+function speak(text){
+  try{
+    const u=new SpeechSynthesisUtterance(text);
+    u.rate=.95; u.pitch=1.0;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* credit year (dynamic) */
+const yEl=document.getElementById('yearAudio'); if(yEl) yEl.textContent = new Date().getFullYear();
+
+/* -------- Magnify overlay (popup on desktop, dialog on mobile) -------- */
+function prefersPopup(){ return window.matchMedia('(min-width: 1024px)').matches; }
+
+function openMagnify(startIndex){
+  TILES = TILES.length ? TILES : Array.from(document.querySelectorAll('.tile'));
+  const seq = TILES.map(b=>({
+    id:b.dataset.id,
+    label:b.querySelector('.big').textContent,
+    example:b.querySelector('.small').textContent,
+    group:b.dataset.group,
+    emoji:b.dataset.emoji
+  }));
+
+  if (prefersPopup()){
+    // Desktop popup (unchanged UX)
+    const w = window.open('', '_blank', 'width=900,height=760');
+    if(!w){ alert('Please allow pop-ups to use Magnify.'); return; }
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Magnify</title><link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;700&display=swap" rel="stylesheet"><style>
+      html,body{height:100%;margin:0;font-family:Lexend,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f7fafc;color:#0f172a}
+      .shell{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:12px}
+      .group{font-size:22px;font-weight:700;color:#0f172a;opacity:.9}
+      .bigbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;width:min(92vw,820px);height:min(50vh,360px);border:6px solid #2563eb;border-radius:20px;background:#fff;cursor:pointer;box-shadow:0 12px 24px rgba(0,0,0,.12)}
+      .label{font-size:96px;font-weight:800;line-height:1}
+      .ex{font-size:22px;color:#ef4444;margin-top:6px}
+      .row{display:flex;gap:10px}
+      .btn{appearance:none;border:0;background:#2563eb;color:#fff;font-weight:700;border-radius:12px;padding:10px 16px;font-size:16px;cursor:pointer}
+    </style></head><body><div class="shell">
+      <div id="group" class="group"></div>
+      <button id="bigbtn" class="bigbtn" aria-label="Play sound"><div id="label" class="label"></div><div id="example" class="ex"></div></button>
+      <div class="row">
+        <button id="back" class="btn">Back/Play Sound</button>
+        <button id="home" class="btn">Home</button>
+        <button id="next" class="btn">Next/Play Sound</button>
+      </div>
+    <script>
+      const SEQ = ${JSON.stringify(seq)};
+      let idx = ${startIndex}; let playedOnce = false;
+      function speak(t){ try{ const u = new SpeechSynthesisUtterance(t); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
+      function play(id){ try{ const a = new Audio('audio/'+id+'.mp3'); a.preload='auto'; a.playsInline=true; a.currentTime=0; a.play().catch(()=>speak(document.getElementById('label').textContent)); } catch(e){ speak(document.getElementById('label').textContent); } }
+      function render(){
+        playedOnce = false;
+        const it = SEQ[idx];
+        const titleText = (it.emoji ? it.emoji + ' ' : '') + (it.group || 'Phonograms');
+        document.getElementById('group').textContent = titleText;
+        document.title = titleText + ' — Magnify';
+        document.getElementById('label').textContent = it.label;
+        document.getElementById('example').textContent = it.example||'';
+        document.getElementById('bigbtn').onclick = ()=>play(it.id);
+      }
+      function nextOrPlay(){ if(!playedOnce){ playedOnce = true; document.getElementById('bigbtn').click(); } else { idx = (idx+1)%SEQ.length; render(); }}
+      function prevOrPlay(){ if(!playedOnce){ playedOnce = true; document.getElementById('bigbtn').click(); } else { idx = (idx-1+SEQ.length)%SEQ.length; render(); } }
+      document.getElementById('next').onclick = nextOrPlay; document.getElementById('home').onclick = ()=>window.close();
+      document.getElementById('back').onclick = prevOrPlay;
+      window.addEventListener('keydown', e=>{ if(e.key==='ArrowRight') nextOrPlay(); if(e.key==='ArrowLeft') prevOrPlay(); if(e.key==='Escape') window.close(); if(e.key===' '|| e.key==='Enter'){ e.preventDefault(); document.getElementById('bigbtn').click(); } });
+      render();
+    <\/script></div></body></html>`;
+    w.document.open(); w.document.write(html); w.document.close();
+    return;
+  }
+
+  // Mobile dialog overlay
+  const dlg = document.getElementById('magnify');
+  const lab = document.getElementById('magLabel');
+  const ex  = document.getElementById('magEx');
+  const grp = document.getElementById('magGroup');
+  const playBtn = document.getElementById('magPlay');
+  const nextBtn = document.getElementById('magNext');
+  const backBtn = document.getElementById('magBack');
+  const homeBtn = document.getElementById('magHome');
+
+  const SEQ = seq; let idx = startIndex; let playedOnce = false;
+  function speak2(t){ try{ const u = new SpeechSynthesisUtterance(t); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
+  function play2(id){ try{ const a = new Audio('audio/'+id+'.mp3'); a.preload='auto'; a.playsInline=true; a.currentTime=0; a.play().catch(()=>speak2(lab.textContent)); } catch(e){ speak2(lab.textContent); } }
+  function render2(){
+    playedOnce = false;
+    const it = SEQ[idx];
+    grp.textContent = `${seq[idx].emoji ? seq[idx].emoji + ' ' : ''}${seq[idx].group || 'Phonograms'}`;
+    lab.textContent = it.label; ex.textContent = it.example || '';
+    playBtn.onclick = ()=>play2(it.id);
+  }
+  function nextOrPlay2(){ if(!playedOnce){ playedOnce = true; playBtn.click(); } else { idx = (idx+1)%SEQ.length; render2(); }}
+  function prevOrPlay2(){ if(!playedOnce){ playedOnce = true; playBtn.click(); } else { idx = (idx-1+SEQ.length)%SEQ.length; render2(); } }
+
+  nextBtn.onclick = nextOrPlay2; backBtn.onclick = prevOrPlay2; homeBtn.onclick = ()=>dlg.close();
+  if(typeof dlg.showModal === 'function') dlg.showModal(); else dlg.show();
+  render2();
+}
+if(magnifyBtn){ magnifyBtn.addEventListener('click', ()=>{ if(LAST_INDEX>=0) openMagnify(LAST_INDEX); else alert('Tap a sound first.'); }); }
+</script>
+</body>
+</html>
