@@ -287,16 +287,45 @@ const AUDIO_IDS = DATA.flatMap(sec => sec.items.map(it => it.id));
 
 /* -------- FAST audio engine (Web Audio with <audio> fallback) -------- */
 class AudioEngine{
-  constructor(){ this.ctx=null; this.buffers=new Map(); this.html=new Map(); this.prefetched=false; }
+  constructor(){ this.ctx=null; this.buffers=new Map(); this.html=new Map(); this.prefetched=false; this.urlCache=new Map(); }
   async unlock(){
     if(this.ctx) { if(this.ctx.state==='suspended') await this.ctx.resume(); return; }
     const AC=window.AudioContext||window.webkitAudioContext;
     if(AC){ this.ctx=new AC(); }
   }
+  async resolveUrl(id){
+    if(this.urlCache.has(id)) return this.urlCache.get(id);
+    const candidates=[`audio/${id}.mp3`,`audio/${id}.mp4`];
+
+    const tryRange = async (url) => {
+      try{
+        const r = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+        return r.ok;
+      }catch(e){ return false; }
+    };
+
+    for(const url of candidates){
+      try{
+        let r = await fetch(url, { method:'HEAD' });
+        if(r.ok){ this.urlCache.set(id,url); return url; }
+        // If HEAD not allowed / unsupported, try a tiny ranged GET
+        if(r.status===405 || r.status===501){
+          const ok = await tryRange(url);
+          if(ok){ this.urlCache.set(id,url); return url; }
+        }
+      }catch(e){
+        const ok = await tryRange(url);
+        if(ok){ this.urlCache.set(id,url); return url; }
+      }
+    }
+    // default (keeps existing behavior if both missing)
+    this.urlCache.set(id, candidates[0]);
+    return candidates[0];
+  }
   async loadBuffer(id){
     if(this.buffers.has(id)) return this.buffers.get(id);
     if(!this.ctx) throw new Error('noctx');
-    const url=`audio/${id}.mp3`;
+    const url=await this.resolveUrl(id);
     const res=await fetch(url); if(!res.ok) throw new Error('fetch');
     const arr=await res.arrayBuffer();
     const buf=await this.ctx.decodeAudioData(arr);
@@ -322,12 +351,17 @@ class AudioEngine{
       }
     }catch(e){ /* ignore */ }
     try{
+      const url = await this.resolveUrl(id);
       let a=this.html.get(id);
       if(!a){
-        a=new Audio(`audio/${id}.mp3`);
+        a=new Audio(url);
         a.preload='auto'; a.playsInline=true; // important for iOS
         this.html.set(id,a);
+      }else{
+        const cur = (a.src||'');
+        if(cur && !cur.endsWith(url)){ a.src = url; }
       }
+      a.currentTime = 0;
       if(onended){ a.onended=onended; } else { a.onended=null; }
       const ok = await a.play().then(()=>true).catch(()=>false);
       return ok;
@@ -441,7 +475,20 @@ function openMagnify(startIndex){
       const SEQ = ${JSON.stringify(seq)};
       let idx = ${startIndex}; let playedOnce = false;
       function speak(t){ try{ const u = new SpeechSynthesisUtterance(t); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
-      function play(id){ try{ const a = new Audio('audio/'+id+'.mp3'); a.preload='auto'; a.playsInline=true; a.currentTime=0; a.play().catch(()=>speak(document.getElementById('label').textContent)); } catch(e){ speak(document.getElementById('label').textContent); } }
+      function play(id){
+        const urls = ['audio/'+id+'.mp3','audio/'+id+'.mp4'];
+        const labelText = ()=>document.getElementById('label').textContent;
+        function tryPlay(i){
+          if(i>=urls.length){ speak(labelText()); return; }
+          try{
+            const a = new Audio(urls[i]);
+            a.preload='auto'; a.playsInline=true; a.currentTime=0;
+            a.onerror = ()=>tryPlay(i+1);
+            a.play().catch(()=>tryPlay(i+1));
+          }catch(e){ tryPlay(i+1); }
+        }
+        tryPlay(0);
+      }
       function render(){
         playedOnce = false;
         const it = SEQ[idx];
@@ -475,7 +522,19 @@ function openMagnify(startIndex){
 
   const SEQ = seq; let idx = startIndex; let playedOnce = false;
   function speak2(t){ try{ const u = new SpeechSynthesisUtterance(t); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
-  function play2(id){ try{ const a = new Audio('audio/'+id+'.mp3'); a.preload='auto'; a.playsInline=true; a.currentTime=0; a.play().catch(()=>speak2(lab.textContent)); } catch(e){ speak2(lab.textContent); } }
+  function play2(id){
+    const urls = ['audio/'+id+'.mp3','audio/'+id+'.mp4'];
+    function tryPlay(i){
+      if(i>=urls.length){ speak2(lab.textContent); return; }
+      try{
+        const a = new Audio(urls[i]);
+        a.preload='auto'; a.playsInline=true; a.currentTime=0;
+        a.onerror = ()=>tryPlay(i+1);
+        a.play().catch(()=>tryPlay(i+1));
+      }catch(e){ tryPlay(i+1); }
+    }
+    tryPlay(0);
+  }
   function render2(){
     playedOnce = false;
     const it = SEQ[idx];
@@ -494,4 +553,3 @@ if(magnifyBtn){ magnifyBtn.addEventListener('click', ()=>{ if(LAST_INDEX>=0) ope
 </script>
 </body>
 </html>
-
